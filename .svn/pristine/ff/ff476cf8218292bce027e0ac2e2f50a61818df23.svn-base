@@ -1,0 +1,169 @@
+﻿using Coldairarrow.Business.HrAssessment;
+using Coldairarrow.Entity.HrAssessment;
+using Coldairarrow.IBusiness.HrAssessment.DTO;
+using Coldairarrow.Util;
+using Microsoft.AspNetCore.Mvc;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Api.Controllers.HrAssessment
+{
+    /// <summary>
+    /// 人事测评
+    /// </summary>
+    [Route("[controller]/[action]")]
+    public class HrAssessmentController : BaseApiController
+    {
+        private IHr_assessment_templateService _IHr_assessment_templateService;
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="iService"></param>
+        public HrAssessmentController(IHr_assessment_templateService iService)
+        {
+            _IHr_assessment_templateService = iService;
+        }
+
+        #region 模板管理
+        /// <summary>
+        /// 模板下拉框
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        [HttpPost]
+        public async Task<List<SelectOption>> GetOptionList(OptionListInputDTO input)
+        {
+            return await _IHr_assessment_templateService.GetOptionListAsync(input);
+        }
+
+
+        /// <summary>
+        /// 查询一个模板
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        [HttpPost]
+        public async Task<HrTemplateInfoDTO> GetModel(IdInputDTO id)
+        {
+            return await _IHr_assessment_templateService.GetHrTemplateInfo(id);
+        }
+
+
+        /// <summary>
+        /// 查询模板列表
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        [HttpPost]
+        public async Task<PageResult<hr_assessment_template>> GetList(PageInput input)
+        {
+            return await _IHr_assessment_templateService.GetHrTemplateList(input);
+        }
+
+        /// <summary>
+        /// 创建模板
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> InsertHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            return await _IHr_assessment_templateService.InsertHrTemplateInfo(vm);
+        }
+
+        /// <summary>
+        /// 修改模板
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> UpdateHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            return await _IHr_assessment_templateService.UpdateHrTemplateInfo(vm);
+        }
+
+        /// <summary>
+        /// 删除模板
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> DeleteHrTemplateInfo(List<string> ids)
+        {
+            return await _IHr_assessment_templateService.DeleteHrTemplateInfo(ids);
+        }
+        #endregion
+
+        #region 测评管理
+        /// <summary>
+        /// 创建测评
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> InsertHrEvaluationInfo(HrEvaluationDTO vm)
+        {
+            return await _IHr_assessment_templateService.InsertHrHrEvaluationInfo(vm);
+        }
+
+        /// <summary>
+        /// 测评得分保存
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> InsertHrAssessmentScore(List<hr_assessment_score> vm)
+        {
+            return await _IHr_assessment_templateService.InsertHrAssessmentScore(vm);
+        }
+        /// <summary>
+        /// 查询测评列表
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<PageResult<HrEvaluationDTO>> GetHrEvaluationList(PageInput<HrEvaluationInput> pageInput)
+        {
+            return await _IHr_assessment_templateService.GetHrEvaluationList(pageInput);
+        }
+
+
+        /// <summary>
+        /// 查看测评
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<HrEvaluationDTO> GetHrEvaluationInfo(IdInputDTO input)
+        {
+            return await _IHr_assessment_templateService.GetHrEvaluationInfo(input);
+        }
+
+
+        /// <summary>
+        /// 导出测评结果
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpGet]
+        public async Task<IActionResult> ExportHrEvaluationInfo(string id)
+        {
+            var bytes = await _IHr_assessment_templateService.ExportHrEvaluationInfo(id);
+            return File(bytes, "application/octet-stream");
+        }
+
+        /// <summary>
+        /// 删除测评
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<AjaxResult> DeleteHrEvaluationInfo(List<string> ids)
+        {
+            return await _IHr_assessment_templateService.DeleteHrEvaluationInfo(ids);
+        }
+
+        #endregion
+    }
+}

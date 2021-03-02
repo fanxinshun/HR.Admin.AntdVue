@@ -1,0 +1,66 @@
+{
+  "AllowedHosts": "*",
+  "log": { //日志配置
+    "minlevel": "Trace", //定义详见Microsoft.Extensions.Logging.LogLevel
+    "console": {
+      "enabled": true
+    },
+    "debug": {
+      "enabled": true
+    },
+    "file": {
+      "enabled": true
+    },
+    "elasticsearch": {
+      "enabled": false,
+      "nodes": [ "http://elastic:123456@localhost:9200/" ],
+      "indexformat": "colder.{0:yyyyMM}"
+    },
+    "overrides": [ //重写日志输出级别
+      {
+        "source": "Microsoft.AspNetCore",
+        "minlevel": "Information"
+      },
+      {
+        "source": "Microsoft.EntityFrameworkCore",
+        "minlevel": "Information"
+      },
+      {
+        "source": "Microsoft.EntityFrameworkCore.Infrastructure",
+        "minlevel": "Warning"
+      }
+    ]
+  },
+  "Cache": {
+    "CacheType": "Redis", //定义详见Coldairarrow.Util.CacheType
+    "RedisEndpoint": "10.28.88.221:6379" //Redis节点地址,定义详见 https://github.com/2881099/csredis
+  },
+  "LogicDelete": true,
+  "Database": {
+    "BaseDb": {
+      "DatabaseType": "MySql",
+      "ConnectionString": "server=10.28.88.238;user id=root;password=3$%*(k/{]rtEE5;persistsecurityinfo=True;database=ha_admin;SslMode=none"
+    },
+    "WorkOrderDb": {
+      "DatabaseType": "MySql",
+      "ConnectionString": "server=10.28.88.238;user id=root;password=3$%*(k/{]rtEE5;persistsecurityinfo=True;database=ha_erp;SslMode=none"
+    }
+  },
+  "WorkOrder": {
+    "Service": "http://10.28.88.225:5050",
+    "Login": "/User/Login"
+  },
+  "FastDFS": {
+    "Host": "10.28.88.234",
+    "Port": "22122",
+    "Group": "group1",
+    "MaxSize": "204800", //200K
+    "TypeFile": "gif,jpg,jpeg,png,bmp,zip,rar,layout,txt,xlsx,zip",
+    "FileRootUrl": "http://img1.taolaigo.com/group1/"
+  },
+  //雪花Id,,以进程为单位,不同进程数据中心Id和机器Id不能同时重复
+  "WorkerId": 1, //机器Id
+  "JWTSecret": "30d739c8-5fa3-11eb-b73c-000c29080cce",
+  "WebRootUrl": "http://localhost:5000", //接口根地址
+  "Urls": "http://*:5000"
+}

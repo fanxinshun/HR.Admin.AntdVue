@@ -1,0 +1,434 @@
+﻿using AutoMapper;
+using Coldairarrow.Entity.HrAssessment;
+using Coldairarrow.IBusiness.HrAssessment.DTO;
+using Coldairarrow.Util;
+using EFCore.Sharding;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Business.HrAssessment
+{
+    /// <summary>
+    /// 人事测评模板
+    /// </summary>
+    public class Hr_assessment_templateService : BaseBusiness<hr_assessment_template>, IHr_assessment_templateService, ITransientDependency
+    {
+        private readonly IMapper _mapper;
+        private readonly Operator _operator;
+
+        #region 构造函数
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        public Hr_assessment_templateService(IDbAccessor db, IMapper mapper, Operator op) : base(db)
+        {
+            _mapper = mapper;
+            _operator = op;
+        }
+
+        #endregion
+
+        protected override string _valueField { get; } = "id";
+        protected override string _textField { get => "template_name"; }
+
+        #region 测评模板
+        /// <summary>
+        /// 查询一个模板
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        public async Task<HrTemplateInfoDTO> GetHrTemplateInfo(IdInputDTO input)
+        {
+            hr_assessment_template template = await GetIQueryable().FirstOrDefaultAsync(x => !x.Deleted && x.id == input.id);
+            if (template.IsNullOrEmpty())
+            {
+                throw new BusException("当前模板不存在");
+            }
+            HrTemplateInfoDTO vm = new HrTemplateInfoDTO()
+            {
+                id = template.id,
+                template_code = template.template_code,
+                template_name = template.template_name,
+                assessment_criteria = template.assessment_criteria,
+                create_user = template.create_user,
+                created_time = template.created_time,
+                updated_user = template.updated_user,
+                updated_time = template.updated_time,
+                Sort = template.Sort,
+                Deleted = template.Deleted
+            };
+            //测评模板分数范围
+            var all_fractiona_items = await Db.GetIQueryable<hr_assessment_fractional_items>().Where(x => x.assessment_template_id == template.id).ToListAsync();
+
+            //测评模板项
+            var templatItems = await Db.GetIQueryable<hr_assessment_template_items>().Where(x => x.assessment_template_id == template.id).ToListAsync();
+            vm.templatItems = templatItems.Select(x => new templatItemsDTO() { id = x.id, assessment_template_id = x.assessment_template_id, item_name = x.item_name, Sort = x.Sort }).ToList();
+            vm.templatItems.ForEach(item =>
+            {
+                item.fractiona_items = all_fractiona_items.FindAll(x => x.assessment_template_id == template.id && x.assessment_template_item_id == item.id).ToList();
+            });
+            return vm;
+        }
+
+        /// <summary>
+        /// 查询模板列表
+        /// </summary>
+        /// <returns></returns>
+        public async Task<PageResult<hr_assessment_template>> GetHrTemplateList(PageInput pageInput)
+        {
+            var source = await Db.GetIQueryable<hr_assessment_template>().Where(x => !x.Deleted).ToListAsync();
+            return source.GetPageResult(pageInput);
+        }
+
+
+        /// <summary>
+        /// 创建模板
+        /// </summary>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        [Transactional]
+        public async Task<AjaxResult> InsertHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            if (vm.IsNullOrEmpty())
+                return Error("数据不能为空");
+            if (vm.templatItems == null || vm.templatItems.Count <= 0)
+                return Error("模板考核项不能为空");
+
+            var template = _mapper.Map<hr_assessment_template>(vm);
+            template.id = IdHelper.GetId();
+            template.create_user = _operator.Property?.UserName;
+            template.created_time = DateTime.Now;
+            template.Deleted = false;
+
+            var newfractiona_fractiona = new List<hr_assessment_fractional_items>();
+            vm.templatItems.ForEach(item =>
+            {
+                item.id = IdHelper.GetId();
+                item.assessment_template_id = template.id;
+
+                item.fractiona_items.ForEach(_item =>
+                {
+                    _item.id = IdHelper.GetId();
+                    _item.assessment_template_id = template.id;
+                    _item.assessment_template_item_id = item.id;
+                });
+                newfractiona_fractiona.AddRange(item.fractiona_items);
+            });
+
+            await Db.InsertAsync(template);
+            await Db.InsertAsync(vm.templatItems);
+            await Db.InsertAsync(newfractiona_fractiona);
+
+            return Success();
+        }
+
+        /// <summary>
+        /// 修改模板
+        /// </summary>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        [Transactional]
+        public async Task<AjaxResult> UpdateHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            hr_assessment_template template = GetEntity(vm.id);
+            if (template.IsNullOrEmpty())
+            {
+                return Error("当前模板不存在");
+            }
+            var hrass = await Db.GetIQueryable<hr_assessment_evaluation>().FirstOrDefaultAsync(x => x.assessment_template_id == vm.id && x.completion_time == null);
+            if (!hrass.IsNullOrEmpty())
+            {
+                return Error("该模板正在使用中，不应该修改");
+            }
+            if (vm.templatItems == null || vm.templatItems.Count <= 0)
+            {
+                return Error("模板考核项不能为空");
+            }
+
+            template.template_code = vm.template_code;
+            template.template_name = vm.template_name;
+            template.assessment_criteria = vm.assessment_criteria;
+            template.updated_user = _operator.Property?.UserName;
+            template.updated_time = DateTime.Now;
+
+            await Db.UpdateAsync(template);
+
+            #region 根据模板Id，重建所有模板项和分数项
+            await Db.DeleteAsync<hr_assessment_template_items>(x => x.assessment_template_id == template.id);
+            await Db.DeleteAsync<hr_assessment_fractional_items>(x => x.assessment_template_id == template.id);
+            var newfractiona_items = new List<hr_assessment_fractional_items>();
+
+            //考核项目和模板关联
+            vm.templatItems.ForEach(item =>
+            {
+                item.id = IdHelper.GetId();
+                item.assessment_template_id = template.id;
+
+                //分数项和模板关联
+                item.fractiona_items.ForEach(_item =>
+                {
+                    _item.id = IdHelper.GetId();
+                    _item.assessment_template_id = template.id;
+                    _item.assessment_template_item_id = item.id;
+                });
+                newfractiona_items.AddRange(item.fractiona_items);
+            });
+
+            #endregion
+
+            await Db.InsertAsync(newfractiona_items);
+            await Db.InsertAsync(vm.templatItems);
+            return Success();
+        }
+        /// <summary>
+        /// 逻辑删除模板
+        /// </summary>
+        /// <param name="ids"></param>
+        /// <returns></returns>
+        public async Task<AjaxResult> DeleteHrTemplateInfo(List<string> ids)
+        {
+            await UpdateAsync(x => ids.Contains(x.id), entity => { entity.Deleted = true; });
+            return Success();
+        }
+        #endregion
+
+        #region 测评
+        /// <summary>
+        /// 创建测评信息
+        /// </summary>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        [Transactional]
+        public async Task<AjaxResult> InsertHrHrEvaluationInfo(HrEvaluationDTO vm)
+        {
+            if (vm.H_users.IsNullOrEmpty() || vm.H_users?.Count == 0)
+            {
+                return Error("评审人员不能为空");
+            }
+            var userLength = vm.H_users.Select(x => x.user_id).Distinct().Count();
+            if (vm.H_users.Count > userLength)
+            {
+                return Error("评审人员存在重复");
+            }
+
+            hr_assessment_evaluation evaluation = _mapper.Map<hr_assessment_evaluation>(vm);
+            evaluation.id = IdHelper.GetId();
+            evaluation.completion_time = null;
+            evaluation.created_time = DateTime.Now;
+            evaluation.create_user = _operator.Property?.UserName;
+            evaluation.Deleted = false;
+            await Db.InsertAsync(evaluation);
+
+            //测评人
+            vm.H_users.ForEach(item =>
+            {
+                item.id = IdHelper.GetId();
+                item.assessment_evaluation_id = evaluation.id;
+            });
+            await Db.InsertAsync(vm.H_users);
+
+            return Success();
+        }
+
+        /// <summary>
+        /// 测评得分保存
+        /// </summary>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        [Transactional]
+        public async Task<AjaxResult> InsertHrAssessmentScore(List<hr_assessment_score> vm)
+        {
+            var evaluation_id = vm[0].assessment_evaluation_id;
+            vm.ForEach(item =>
+            {
+                item.assessment_user_id = _operator.Property?.UserName;
+                item.assessment_user_name = _operator.Property.RealName;
+            });
+            //保存评分
+            foreach (var item in vm)
+            {
+                if (item.id.IsNullOrEmpty())
+                {
+                    item.id = IdHelper.GetId();
+                    item.created_time = DateTime.Now;
+                    item.create_user = _operator.Property?.UserName;
+                    await Db.InsertAsync(item);
+                }
+                else
+                {
+                    item.updated_time = DateTime.Now;
+                    await Db.UpdateAsync(item);
+                }
+            }
+            //判断是否所有测评人已经测评完成--更新测评完成时间
+            //从测评得分表，查询本测评中所有已测评人员Id
+            var all_score = await Db.GetIQueryable<hr_assessment_score>().Where(x => x.assessment_evaluation_id == evaluation_id).ToListAsync();
+            //已测评人数
+            var score_usersActualCount = all_score.Select(x => x.assessment_user_id).Distinct().Count();
+
+            //从测评人员表，查询应测评人员
+            var hr_users = await Db.GetIQueryable<hr_assessment_user>().Where(x => x.assessment_evaluation_id == evaluation_id).ToListAsync();
+            //应测评人数
+            var score_usersPlanCount = hr_users.Select(x => x.user_id).Distinct().Count();
+
+            //全部测评后更新完成时间
+            if (score_usersPlanCount <= score_usersActualCount)
+            {
+                var evaluation = Db.GetEntity<hr_assessment_evaluation>(evaluation_id);
+                evaluation.completion_time = DateTime.Now;
+                await Db.UpdateAsync(evaluation);
+            }
+            return Success();
+        }
+
+        /// <summary>
+        /// 查询测评列表
+        /// </summary>
+        /// <param name="pageInput"></param>
+        /// <returns></returns>
+        public async Task<PageResult<HrEvaluationDTO>> GetHrEvaluationList(PageInput<HrEvaluationInput> pageInput)
+        {
+            //根据用户查询测评数据
+            var hasUsers = await Db.GetIQueryable<hr_assessment_user>().Where(x => x.user_id == _operator.Property.UserName).ToListAsync();
+            var evaluationIds = hasUsers.Select(x => x.assessment_evaluation_id).ToList();
+            var q = Db.GetIQueryable<hr_assessment_evaluation>().Where(x => !x.Deleted && (evaluationIds.Contains(x.id) || x.create_user == _operator.Property.UserName));
+
+            var search = pageInput.Search;
+            if (!search.user_name.IsNullOrEmpty())
+            {
+                var user_name = $"%{search.user_name}%";
+                q = q.Where(x =>
+                      EF.Functions.Like(x.user_name, user_name)
+                      || EF.Functions.Like(x.user_name, user_name));
+            }
+            var evaluationPage = q.GetPageResult(pageInput);
+            var evaluationPageData = evaluationPage.Data?.ToJson().ToList<HrEvaluationDTO>();
+
+            var evaluation_ids = evaluationPageData?.Select(x => x.id).ToList();
+
+            //从测评人员表，查询应测评人员
+            var hr_users = await Db.GetIQueryable<hr_assessment_user>().Where(x => evaluation_ids.Contains(x.assessment_evaluation_id)).ToListAsync();
+
+            //从测评评分结果，查询已测评信息
+            var hr_scores = await Db.GetIQueryable<hr_assessment_score>().Where(x => evaluation_ids.Contains(x.assessment_evaluation_id)).ToListAsync();
+
+            evaluationPageData?.ForEach(item =>
+            {
+                item.status = "0";
+                item.statusText = "未完成";
+
+                var hr_user_ids = hr_users.Where(x => x.assessment_evaluation_id == item.id).Select(x => x.user_id).ToList();
+                //当前用户是否测评人
+                if (hr_user_ids.Contains(_operator.Property?.UserName))
+                {
+                    //是否已测评
+                    var scores = hr_scores.Where(x => x.assessment_evaluation_id == item.id).FirstOrDefault(x => x.assessment_user_id == _operator.Property?.UserName);
+                    item.status = scores.IsNullOrEmpty() ? "1" : "2";
+                    item.statusText = scores.IsNullOrEmpty() ? "待测评" : "已测评";
+                }
+                if (!item.completion_time.IsNullOrEmpty())
+                {
+                    item.status = "3";
+                    item.statusText = "已完成";
+                }
+            });
+            var pageResult = new PageResult<HrEvaluationDTO>()
+            {
+                Data = evaluationPageData.OrderBy(x => x.status).ToList(),
+                Total = evaluationPage.Total
+            };
+            return pageResult;
+        }
+
+        /// <summary>
+        /// 查看测评
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        public async Task<HrEvaluationDTO> GetHrEvaluationInfo(IdInputDTO input)
+        {
+            //测评记录
+            var evaluation = Db.GetEntity<hr_assessment_evaluation>(input.id);
+
+            HrEvaluationDTO vm = new HrEvaluationDTO()
+            {
+
+                id = evaluation.id,
+                evaluation_name = evaluation.evaluation_name,
+                assessment_template_id = evaluation.assessment_template_id,
+                user_id = evaluation.user_id,
+                user_name = evaluation.user_name,
+                completion_time = evaluation.completion_time,
+                create_user = evaluation.create_user,
+                created_time = evaluation.created_time,
+                updated_user = evaluation.updated_user,
+                updated_time = evaluation.updated_time,
+                Sort = evaluation.Sort,
+                Deleted = evaluation.Deleted
+            };
+
+            //测评人信息
+            vm.H_users = await Db.GetIQueryable<hr_assessment_user>().Where(x => x.assessment_evaluation_id == vm.id).ToListAsync();
+
+            //测评分数
+            var templentItemsScore = await Db.GetIQueryable<hr_assessment_score>().Where(x => x.assessment_evaluation_id == vm.id).ToListAsync();
+
+            vm.TemplateInfo = await GetHrTemplateInfo(new IdInputDTO() { id = vm.assessment_template_id });
+            vm.TemplateInfo.templatItems.ForEach(items =>
+            {
+                items.H_Score = templentItemsScore.FindAll(x => x.assessment_items_id == items.id);
+            });
+            return vm;
+        }
+
+
+        /// <summary>
+        /// 查看测评
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public async Task<byte[]> ExportHrEvaluationInfo(string id)
+        {
+            HrEvaluationDTO vm = await GetHrEvaluationInfo(new IdInputDTO() { id = id });
+            DataTable tblDatas = new DataTable();
+            DataColumn dc = tblDatas.Columns.Add("编号", Type.GetType("System.String"));
+            tblDatas.Columns.Add("考核项目", Type.GetType("System.String"));
+
+            //添加测评人列
+            vm.TemplateInfo.templatItems?[0].H_Score?.ForEach(user =>
+            {
+                tblDatas.Columns.Add(user.assessment_user_name, Type.GetType("System.String"));
+            });
+            //循环模板
+            int i = 0;
+            vm.TemplateInfo.templatItems?.ForEach(template =>
+            {
+                var row = new List<object> { (i++).ToString(), template.item_name };
+                template.H_Score.ForEach(user =>
+                {
+                    row.Add(user.score?.ToString());
+                });
+                tblDatas.Rows.Add(row.ToArray());
+            });
+
+            return AsposeOfficeHelper.DataTableToExcelBytes(tblDatas);
+        }
+
+        /// <summary>
+        /// 删除测评
+        /// </summary>
+        /// <param name="ids"></param>
+        /// <returns></returns>
+        public async Task<AjaxResult> DeleteHrEvaluationInfo(List<string> ids)
+        {
+            await Db.UpdateAsync<hr_assessment_evaluation>(x => ids.Contains(x.id), entity => { entity.Deleted = true; });
+            return Success();
+        }
+
+        #endregion
+    }
+}

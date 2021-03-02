@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Coldairarrow.Entity</RootNamespace>
+    <AssemblyName>Coldairarrow.Entity</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="ha_erp\**" />
+    <EmbeddedResource Remove="ha_erp\**" />
+    <None Remove="ha_erp\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="MiniPrograms\mini_attachment_module.cs" />
+    <Compile Remove="MiniPrograms\sys_attachment.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ComponentModel.Annotations" Version="4.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Coldairarrow.Util\01.Coldairarrow.Util.csproj" />
+  </ItemGroup>
+
+</Project>

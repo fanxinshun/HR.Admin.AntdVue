@@ -1,0 +1,103 @@
+import axios from 'axios'
+import TokenCache from '@/utils/cache/TokenCache'
+import defaultSettings from '@/config/defaultSettings'
+import ProcessHelper from '@/utils/helper/ProcessHelper'
+
+const rootUrl = () => {
+  if (ProcessHelper.isProduction() || ProcessHelper.isPreview()) {
+    return defaultSettings.publishRootUrl
+  } else {
+    return defaultSettings.localRootUrl
+  }
+}
+
+export const Axios = axios.create({
+  baseURL: rootUrl(),
+  timeout: defaultSettings.apiTimeout
+})
+
+// 在发送请求之前做某件事
+Axios.interceptors.request.use(config => {
+  // 设置以 form 表单的形式提交参数，如果以 JSON 的形式提交表单，可忽略
+  // if (config.method === 'post') {
+  //     // JSON 转换为 FormData
+  //     const formData = new FormData()
+  //     Object.keys(config.data).forEach(key => formData.append(key, config.data[key]))
+  //     config.data = formData
+  // }
+  // 携带token
+  if (TokenCache.getToken()) {
+    config.headers.Authorization = 'Bearer ' + TokenCache.getToken()
+  }
+  return config
+}, error => {
+  return Promise.reject(error)
+})
+
+// 是否正在刷新token
+let isRefreshing = true
+// 重试队列，每一项将是一个待执行的函数形式
+let requests = []
+// 返回状态判断(添加响应拦截器)
+Axios.interceptors.response.use(response => {
+  // 授权失败
+  if (!response.data.Success && response.data.ErrorCode == 401) {
+    const config = response.config
+    if (isRefreshing) {
+      isRefreshing = false
+      return refreshToken(config)
+    } else {
+      // 正在刷新token，将返回一个未执行resolve的promise
+      return new Promise((resolve) => {
+        // 将resolve放进队列，用一个函数形式来保存，等token刷新后直接执行
+        requests.push((token) => {
+          config.headers.Authorization = 'Bearer ' + token
+          resolve(Axios(config))
+        })
+      })
+    }
+  }
+  return response.data
+}, error => {
+  let errorMsg = ''
+  if (error.message.includes('timeout')) {
+    errorMsg = '请求超时!'
+  } else {
+    errorMsg = '请求异常!'
+  }
+  return Promise.resolve({
+    Success: false,
+    Msg: errorMsg
+  })
+})
+
+//刷新token
+function refreshToken(config) {
+  return Axios.post('/Base_Manage/Home/RefreshToken?token=' + TokenCache.getToken()).then(res => {
+    if (res.Success) {
+      isRefreshing = true
+      const token = res.Data
+      TokenCache.setToken(token)
+      config.headers.Authorization = 'Bearer ' + token
+      // 已经刷新了token，将所有队列中的请求进行重试
+      requests.forEach(cb => cb(token))
+      requests = []
+      return Axios(config)
+    } else {
+      TokenCache.deleteToken()
+      location.href = '/'
+      return res
+    }
+  })
+}
+
+export default {
+  install(Vue) {
+    Object.defineProperty(Vue.prototype, '$http', {
+      value: Axios
+    })
+    Object.defineProperty(Vue.prototype, '$rootUrl', {
+      value: rootUrl()
+    })
+  }
+}

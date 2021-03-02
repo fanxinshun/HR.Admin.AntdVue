@@ -1,0 +1,220 @@
+﻿using AutoMapper;
+using Coldairarrow.Business.Cache;
+using Coldairarrow.Entity;
+using Coldairarrow.Entity.Base_Manage;
+using Coldairarrow.Entity.MiniPrograms;
+using Coldairarrow.IBusiness;
+using Coldairarrow.Util;
+using EFCore.Sharding;
+using LinqKit;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Business.Base_Manage
+{
+    public class Base_UserBusiness : BaseBusiness<Base_User>, IBase_UserBusiness, ITransientDependency
+    {
+        readonly IOperator _operator;
+        readonly IMapper _mapper;
+        public Base_UserBusiness(
+            IDbAccessor db,
+            IBase_UserCache userCache,
+            IOperator @operator,
+            IMapper mapper
+            )
+            : base(db)
+        {
+            _userCache = userCache;
+            _operator = @operator;
+            _mapper = mapper;
+        }
+        IBase_UserCache _userCache { get; }
+        protected override string _textField => "RealName";
+
+        #region 外部接口
+
+        public async Task<PageResult<Base_UserDTO>> GetDataListAsync(PageInput<Base_UsersInputDTO> input)
+        {
+            Expression<Func<Base_User, Base_Department, Base_UserDTO>> select = (a, b) => new Base_UserDTO
+            {
+                DepartmentName = b.Name
+            };
+            var search = input.Search;
+            select = select.BuildExtendSelectExpre();
+            var q_User = search.all ? Db.GetIQueryable<Base_User>() : GetIQueryable();
+            var q = from a in q_User.AsExpandable()
+                    join b in Db.GetIQueryable<Base_Department>() on a.DepartmentId equals b.Id into ab
+                    from b in ab.DefaultIfEmpty()
+                    select @select.Invoke(a, b);
+
+            q = q.WhereIf(!search.userId.IsNullOrEmpty(), x => x.Id == search.userId);
+            if (!search.keyword.IsNullOrEmpty())
+            {
+                var keyword = $"%{search.keyword}%";
+                q = q.Where(x =>
+                      EF.Functions.Like(x.UserName, keyword)
+                      || EF.Functions.Like(x.RealName, keyword));
+            }
+
+            var list = await q.GetPageResultAsync(input);
+
+            await SetProperty(list.Data);
+
+            return list;
+
+            async Task SetProperty(List<Base_UserDTO> users)
+            {
+                //补充用户角色属性
+                List<string> userIds = users.Select(x => x.Id).ToList();
+                var userRoles = await (from a in Db.GetIQueryable<Base_UserRole>()
+                                       join b in Db.GetIQueryable<Base_Role>() on a.RoleId equals b.Id
+                                       where userIds.Contains(a.UserId)
+                                       select new
+                                       {
+                                           a.UserId,
+                                           RoleId = b.Id,
+                                           b.RoleName
+                                       }).ToListAsync();
+
+                var userProjects = await (from a in Db.GetIQueryable<mini_project_user>()
+                                          join b in Db.GetIQueryable<mini_project>() on a.Project_Id equals b.Id
+                                          where userIds.Contains(a.User_Id)
+                                          select new
+                                          {
+                                              a.User_Id,
+                                              a.Project_Id,
+                                              b.Project_Name
+                                          }).ToListAsync();
+
+                users.ForEach(aUser =>
+                {
+                    var roleList = userRoles.Where(x => x.UserId == aUser.Id);
+                    aUser.RoleIdList = roleList.Select(x => x.RoleId).ToList();
+                    aUser.RoleNameList = roleList.Select(x => x.RoleName).ToList();
+                    aUser.ProjectIdList = userProjects.Select(x => x.Project_Id).ToList();
+                });
+            }
+        }
+
+        public async Task<Base_UserDTO> GetTheDataAsync(string id)
+        {
+            if (id.IsNullOrEmpty())
+                return null;
+            else
+            {
+                PageInput<Base_UsersInputDTO> input = new PageInput<Base_UsersInputDTO>
+                {
+                    Search = new Base_UsersInputDTO
+                    {
+                        all = true,
+                        userId = id
+                    }
+                };
+                return (await GetDataListAsync(input)).Data.FirstOrDefault();
+            }
+        }
+
+        [DataAddLog(UserLogType.系统用户管理, "RealName", "用户")]
+        [DataRepeatValidate(
+            new string[] { "UserName" },
+            new string[] { "用户名" })]
+        [Transactional]
+        public async Task AddDataAsync(UserEditInputDTO input)
+        {
+            input.Last_Interview_Project = input.ProjectIdList.FirstOrDefault(x => x == input.Last_Interview_Project) ?? input.ProjectIdList.FirstOrDefault();
+            var usercount = await GetIQueryable().CountAsync(x => x.UserName == input.UserName.Trim());
+            if (usercount > 0)
+            {
+                throw new BusException($"用户名{input.UserName}已存在");
+            }
+            await InsertAsync(_mapper.Map<Base_User>(input));
+            await SetUserRoleAndProjectAsync(input.Id, input.RoleIdList, input.ProjectIdList);
+        }
+
+        [DataEditLog(UserLogType.系统用户管理, "RealName", "用户")]
+        [DataRepeatValidate(
+            new string[] { "UserName" },
+            new string[] { "用户名" })]
+        [Transactional]
+        public async Task UpdateDataAsync(UserEditInputDTO input)
+        {
+            if (input.Id == GlobalData.ADMINID && _operator?.UserId != input.Id)
+                throw new BusException("禁止更改超级管理员！");
+
+            var usercount = await GetIQueryable().CountAsync(x => x.UserName == input.UserName.Trim());
+            if (usercount > 1)
+            {
+                throw new BusException($"该用户名{input.UserName}已存在");
+            }
+            input.Last_Interview_Project = input.ProjectIdList.FirstOrDefault(x => x == input.Last_Interview_Project) ?? input.ProjectIdList.FirstOrDefault();
+            await UpdateAsync(_mapper.Map<Base_User>(input));
+            await SetUserRoleAndProjectAsync(input.Id, input.RoleIdList, input.ProjectIdList);
+            await _userCache.UpdateCacheAsync(input.Id);
+        }
+
+        [DataDeleteLog(UserLogType.系统用户管理, "RealName", "用户")]
+        [Transactional]
+        public async Task DeleteDataAsync(List<string> ids)
+        {
+            if (ids.Contains(GlobalData.ADMINID))
+                throw new BusException("超级管理员是内置账号,禁止删除！");
+
+            if (ids.Contains(_operator.Property.Id))
+                throw new BusException("自己的账号无法由自己删除！");
+
+            await DeleteAsync(ids);
+
+            await _userCache.UpdateCacheAsync(ids);
+        }
+
+        /// <summary>
+        /// 更新当前登录用户信息【最后访问的项目】
+        /// </summary>
+        /// <returns></returns>
+        public async Task<string> UpdateUserLastInterviewProject(ChangeProjectInputDTO input)
+        {
+            _operator.Property.Last_Interview_Project = input.projectId;
+            await UpdateAsync(_mapper.Map<Base_User>(_operator.Property));
+            await _userCache.UpdateCacheAsync(_operator?.UserId);
+
+            //刷新token
+            return input.token.RefreshToken(input.projectId);
+        }
+        #endregion
+
+        #region 私有成员
+
+        private async Task SetUserRoleAndProjectAsync(string userId, List<string> roleIds, List<string> projectIds)
+        {
+            roleIds = roleIds ?? new List<string>();
+            var userRoleList = roleIds.Select(x => new Base_UserRole
+            {
+                Id = IdHelper.GetId(),
+                CreateTime = DateTime.Now,
+                UserId = userId,
+                RoleId = x
+            }).ToList();
+            await Db.DeleteAsync<Base_UserRole>(x => x.UserId == userId);
+            await Db.InsertAsync(userRoleList);
+
+            projectIds = projectIds ?? new List<string>();
+            var projectList = projectIds.Select(x => new mini_project_user
+            {
+                Id = IdHelper.GetId(),
+                CreateTime = DateTime.Now,
+                CreatorId = _operator?.UserId,
+                User_Id = userId,
+                Project_Id = x
+            }).ToList();
+            await Db.DeleteAsync<mini_project_user>(x => x.User_Id == userId);
+            await Db.InsertAsync(projectList);
+
+        }
+
+        #endregion
+    }
+}

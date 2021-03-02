@@ -1,0 +1,24 @@
+﻿using Coldairarrow.Entity.HrAssessment;
+using Coldairarrow.Util;
+using System.Collections.Generic;
+
+namespace Coldairarrow.IBusiness.HrAssessment.DTO
+{
+    /// <summary>
+    /// 测评模板
+    /// </summary>
+    [Map(typeof(hr_assessment_template))]
+    public class HrTemplateInfoDTO : hr_assessment_template
+    {
+        /// <summary>
+        /// 分数项列表
+        /// </summary>
+        public List<hr_assessment_fractional_items> fractiona_items { get; set; }
+
+        /// <summary>
+        /// 考核项目列表
+        /// </summary>
+        public List<hr_assessment_template_items> template_items { get; set; }
+
+    }
+}

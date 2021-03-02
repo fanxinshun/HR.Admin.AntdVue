@@ -1,0 +1,103 @@
+﻿using AutoMapper;
+using Coldairarrow.Business.Cache;
+using Coldairarrow.Business.MiniPrograms;
+using Coldairarrow.Entity;
+using Coldairarrow.Entity.Base_Manage;
+using Coldairarrow.Entity.MiniPrograms;
+using Coldairarrow.Entity.WorkOrder;
+using Coldairarrow.IBusiness;
+using Coldairarrow.Util;
+using Coldairarrow.Util.DataAccess;
+using EFCore.Sharding;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Business.Base_Manage
+{
+    public class HomeBusiness : BaseBusiness<Base_User>, IHomeBusiness, ITransientDependency
+    {
+        readonly IOperator _operator;
+        readonly IMapper _mapper;
+        readonly Imini_project_userBusiness _mini_project_userBusiness;
+        readonly IWorkOrderDbAccessor _WDb;
+        readonly Base_UserBusiness _Base_UserBusiness;
+        IBase_UserCache _userCache { get; }
+        public HomeBusiness(IDbAccessor db, IOperator @operator,
+            IMapper mapper,
+            Imini_project_userBusiness mini_project_userBusiness,
+            IBase_UserCache userCache,
+            IWorkOrderDbAccessor workOrderDbAccessor,
+            Base_UserBusiness base_UserBusiness)
+            : base(db)
+        {
+            _operator = @operator;
+            _mapper = mapper;
+            _mini_project_userBusiness = mini_project_userBusiness;
+            _userCache = userCache;
+            _WDb = workOrderDbAccessor;
+            _Base_UserBusiness = base_UserBusiness;
+        }
+
+        public async Task<string> SubmitLoginAsync(LoginInputDTO input)
+        {
+            switch (input.LoginSource)
+            {
+                case 0://登陆测评系统
+                    if (input.verification_code.IsNullOrEmpty())
+                        throw new BusException("请输入验证码！");
+                    if (!input.verification_code.VerifyCode())
+                        throw new BusException("验证码不正确！");
+
+                    var theUser = await GetIQueryable().FirstOrDefaultAsync(x => x.UserName == input.userName && x.Password == input.password.ToMD5String());
+                    if (theUser.IsNullOrEmpty())
+                        throw new BusException("账号或密码不正确！");
+
+                    var theUserDto = await _Base_UserBusiness.GetTheDataAsync(theUser?.Id);
+                    if (theUserDto.UserName.ToUpper() != "ADMIN" && (theUserDto.RoleIdList.Count == 0 || theUserDto.ProjectIdList.Count == 0))
+                    {
+                        throw new BusException("该账号没有项目地或者角色信息，请联系管理员添加权限");
+                    }
+
+                    JWTPayload jWTPayload = new JWTPayload
+                    {
+                        UserId = theUser.Id,
+                        Expire = DateTime.Now.AddDays(1)
+                    };
+                    return JWTHelper.GetToken(jWTPayload.ToJson(), JWTHelper.JWTSecret);
+                case 1://登陆工单系统
+                    var url = ConfigHelper.GetValue("WorkOrder:Service") + ConfigHelper.GetValue("WorkOrder:Login");
+                    var dicts = new Dictionary<string, object>()
+                    {
+                        { "user_name",input.userName},
+                        { "user_pwd",input.password},
+                        { "verification_code",input.verification_code},
+                    };
+                    return HttpHelper.PostData(url, dicts, null, ContentType.Json);
+                default:
+                    return "请指定要登陆的系统";
+            }
+        }
+
+        public async Task ChangePwdAsync(ChangePwdInputDTO input)
+        {
+            var theUser = _operator.Property;
+            if (theUser.Password != input.oldPwd?.ToMD5String())
+                throw new BusException("原密码错误!");
+
+            theUser.Password = input.newPwd.ToMD5String();
+            await UpdateAsync(_mapper.Map<Base_User>(theUser));
+        }
+
+        /// <summary>
+        /// 验证码
+        /// </summary>
+        /// <returns></returns>
+        public byte[] VerifyCode()
+        {
+            return ImgVerifyCodeHelper.BuildVerifyCode(4);
+        }
+    }
+}

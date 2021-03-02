@@ -1,0 +1,134 @@
+﻿using AutoMapper;
+using Coldairarrow.Business.Cache;
+using Coldairarrow.Business.MiniPrograms;
+using Coldairarrow.Entity;
+using Coldairarrow.Entity.Base_Manage;
+using Coldairarrow.Entity.MiniPrograms;
+using Coldairarrow.Entity.WorkOrder;
+using Coldairarrow.IBusiness;
+using Coldairarrow.Util;
+using Coldairarrow.Util.DataAccess;
+using EFCore.Sharding;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Business.Base_Manage
+{
+    public class HomeBusiness : BaseBusiness<Base_User>, IHomeBusiness, ITransientDependency
+    {
+        readonly IOperator _operator;
+        readonly IMapper _mapper;
+        readonly Imini_project_userBusiness _mini_project_userBusiness;
+        readonly IWorkOrderDbAccessor _WDb;
+        readonly Base_UserBusiness _Base_UserBusiness;
+        IBase_UserCache _userCache { get; }
+        public HomeBusiness(IDbAccessor db, IOperator @operator,
+            IMapper mapper,
+            Imini_project_userBusiness mini_project_userBusiness,
+            IBase_UserCache userCache,
+            IWorkOrderDbAccessor workOrderDbAccessor,
+            Base_UserBusiness base_UserBusiness)
+            : base(db)
+        {
+            _operator = @operator;
+            _mapper = mapper;
+            _mini_project_userBusiness = mini_project_userBusiness;
+            _userCache = userCache;
+            _WDb = workOrderDbAccessor;
+            _Base_UserBusiness = base_UserBusiness;
+        }
+
+        [Transactional]
+        public async Task<string> SubmitLoginAsync(LoginInputDTO input)
+        {
+            var md5pwd = input.password.ToMD5String();
+            var theUser = await GetIQueryable().FirstOrDefaultAsync(x => x.UserName == input.userName);
+            UserEditInputDTO userDto = null;
+            if (!theUser.IsNullOrEmpty() && theUser.Password != md5pwd)
+            {
+                throw new BusException("账号或密码不正确！");
+            }
+            if (theUser.IsNullOrEmpty())
+            {
+                //查询WorkOrder用户信息
+                var wUser = await _WDb.GetIQueryable<sys_user>().FirstOrDefaultAsync(x => x.user_name == input.userName && x.user_pwd == md5pwd.ToUpper());
+                if (wUser.IsNullOrEmpty())
+                {
+                    throw new BusException("账号或密码不正确！");
+                }
+                if (wUser.user_status != 1)
+                {
+                    throw new BusException("该账号状态无效！");
+                }
+                if (wUser.is_deleted == 1)
+                {
+                    throw new BusException("该账号已删除！");
+                }
+
+                //创建用户
+                //设置默认权限
+                var defaultRole = await Db.GetIQueryable<Base_Role>().FirstOrDefaultAsync(x => x.RoleName == RoleTypes.普通用户.ToString());
+                //设置默认项目
+                var defalultProject = await Db.GetIQueryable<mini_project>().OrderBy(x => x.Sort).FirstOrDefaultAsync();
+                userDto = new UserEditInputDTO()
+                {
+                    Id = IdHelper.GetId(),
+                    CreateTime = DateTime.Now,
+                    CreatorId = "Self",
+
+                    UserName = wUser.user_name,
+                    RealName = wUser.full_name,
+                    Sex = Sex.Non,
+                    Password = md5pwd,
+                    RoleIdList = new List<string> { defaultRole?.Id },
+                    ProjectIdList = new List<string> { defalultProject?.Id }
+                };
+                await _Base_UserBusiness.AddDataAsync(userDto);
+            }
+
+            var theUserDto = await _Base_UserBusiness.GetTheDataAsync(theUser?.Id ?? userDto?.Id);
+
+            if (theUserDto.UserName.ToUpper() != "ADMIN" && (theUserDto.RoleIdList.Count == 0 || theUserDto.ProjectIdList.Count == 0))
+            {
+                throw new BusException("该账号没有项目地或者角色信息，请联系管理员添加权限");
+            }
+
+            switch (input.LoginSource)
+            {
+                case 0://登陆测评系统
+                    JWTPayload jWTPayload = new JWTPayload
+                    {
+                        UserId = theUser.Id,
+                        Expire = DateTime.Now.AddDays(1)
+                    };
+                    var token = JWTHelper.GetToken(jWTPayload.ToJson(), JWTHelper.JWTSecret);
+                    return token;
+                case 1://登陆工单系统
+                    var url = ConfigHelper.GetValue("WorkOrder:Service") + ConfigHelper.GetValue("WorkOrder:Login");
+                    var dicts = new Dictionary<string, object>()
+                    {
+                        { "user_name",input.userName},
+                        { "user_pwd",input.password},
+                        { "verification_code",input.verification_code},
+                    };
+                    var result = HttpHelper.PostData(url, dicts, null, ContentType.Json);
+                    return result;
+                default:
+                    return "请指定有效的LoginSource";
+            }
+        }
+
+        public async Task ChangePwdAsync(ChangePwdInputDTO input)
+        {
+            var theUser = _operator.Property;
+            if (theUser.Password != input.oldPwd?.ToMD5String())
+                throw new BusException("原密码错误!");
+
+            theUser.Password = input.newPwd.ToMD5String();
+            await UpdateAsync(_mapper.Map<Base_User>(theUser));
+        }
+    }
+}

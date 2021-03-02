@@ -1,0 +1,404 @@
+<template>
+  <a-modal :title="title" width="60%" :visible="visible" :confirmLoading="loading" :maskClosable="false" @ok="handleSubmit" @cancel="()=>{this.visible=false}">
+    <a-spin :spinning="loading">
+      <a-form-model ref="ruleForm" :model="ruleForm" :rules="rules" v-bind="layout">
+        <a-form-model-item label="模板名称" prop="template_name">
+          <a-input v-model="ruleForm.template_name" autocomplete="off" style="width: 250px" :disabled="type === 'view'" />
+        </a-form-model-item>
+        <a-form-model-item label="考核标准" prop="assessment_criteria">
+          <a-input v-model.number="ruleForm.assessment_criteria" style="width: 100px" :disabled="type === 'view'" addon-after="分" />
+        </a-form-model-item>
+        <a-form-model-item label="分数选项" class="scoresRangeItem" prop="maxMinScores">
+          <a-input v-model="ruleForm.maxMinScores" style="width: 100px;position: absolute;z-index: -1;opacity: 0;" />
+          <a-row style="width: 350px">
+            <a-col :span="5">
+              <a-form-item>
+                <a-input-number v-model="ruleForm.min" @change="handelMinChange" controls-position="right" style="width: 60px" :min="0" :max="100" :disabled="type === 'view'"/>
+              </a-form-item>
+            </a-col>
+            <a-col class="line" :span="1">-</a-col>
+            <a-col :span="5">
+              <a-form-item>
+                <a-input-number v-model="ruleForm.max" @change="handelMaxChange" controls-position="right" style="width: 60px" :min="0" :max="100" :disabled="type === 'view'"/>
+              </a-form-item>
+            </a-col>
+            <a-col :span="13"><a-button type="primary" icon="plus" @click="handelClickAdd" :disabled="isCanAdd || type === 'view'"></a-button>&nbsp;&nbsp;添加分数区间</a-col>
+          </a-row>
+        </a-form-model-item>
+        <a-form-model-item label="区间列表" class="scoresRangeJson" v-if="ruleForm.scoresRange.length > 0">
+          <a-tag v-for="(item, index) in ruleForm.scoresRange" :key="index" :closable="type != 'view'" :disable-transitions="false" :visible="true" class="mr10" @close="handleClickClose(index)">
+            {{item.min}} ~ {{item.max}}
+          </a-tag>
+        </a-form-model-item>
+        <a-table
+          ref="table"
+          :columns="tableColumns"
+          :rowKey="(record,index)=>{return index}"
+          :dataSource="tableData"
+          :bordered="true"
+          :pagination="false"
+          size="small" v-if="ruleForm.scoresRange.length > 0">
+          <template v-for="item in tableHeaderJson" :slot="item" slot-scope="text, record">
+            <a-input v-model="record[item]" :disabled="type === 'view'" placeholder="请输入......"/>
+          </template>
+          <template slot="action" slot-scope="text, record, index">
+              <a-button type="primary" circle icon="plus" @click="addTable(true)" v-if="tableData.length - 1 === index" :disabled="type === 'view'"></a-button>
+              <a-divider type="vertical" v-if="(tableData.length - 1 === index) && tableData.length > 1" />
+              <a-button type="danger" circle icon="minus" @click="addTable(false, index)" v-if="tableData.length > 1" :disabled="type === 'view'"></a-button>
+          </template>
+        </a-table>
+      </a-form-model>
+    </a-spin>
+  </a-modal>
+</template>
+
+<script>
+  export default {
+    props: {
+      parentObj: Object
+    },
+    data() {
+      return {
+        layout: {
+          labelCol: {
+            span: 5
+          },
+          wrapperCol: {
+            span: 18
+          }
+        },
+        visible: false,
+        loading: false,
+        rules: {
+          template_name: [{
+            required: true,
+            message: '请输入模板名称'
+          }],
+          assessment_criteria: [{
+            required: true,
+            message: '请输入考核分数标准'
+          }],
+          maxMinScores: [{
+            required: true,
+            message: '请检查分数选项是否符合'
+          }],
+        },
+        title: '',
+        isCanAdd: false,
+        ruleForm: {
+          id: '',
+          template_code: null,
+          template_name: '',
+          assessment_criteria: 100,
+          create_user: '',
+          created_time: '',
+          updated_user: '',
+          updated_time: '',
+          Sort: 0,
+          min: 0,
+          max: 5,
+          scoresRange: [],
+          maxMinScores: 'maxMinScores'
+        },
+        isTableData: false,
+        tableData: [{
+          Sort: 1,
+          item_name: ''
+        }],
+        tableHeader: [],
+        tableHeaderJson: [],
+        submitData: [],
+        multipleSelection: [],
+        tableColumns: [],
+        type: 'add',
+        id: '',
+        minScoresArr: [],
+        maxScoresArr: []
+      }
+    },
+    methods: {
+      init() {
+        this.visible = true
+        // this.ruleForm = {}
+        this.$nextTick(() => {
+          this.tableHeader = []
+          this.tableHeaderJson = []
+          this.submitData = []
+          this.tableColumns = []
+          this.ruleForm.scoresRange = []
+          this.ruleForm.min = 0
+          this.ruleForm.max = 5
+          this.tableData = [{
+            Sort: 1,
+            item_name: ''
+          }]
+          this.$refs['ruleForm'].resetFields()
+        })
+      },
+      openForm(data) {
+        this.type = 'add'
+        this.id = ''
+        console.log(data)
+        this.init()
+        if (data) {
+          this.type = data.type
+          this.id = data.id
+          this.loading = true
+          this.$http.post('/HrAssessment/GetModel', {
+            id: this.id
+          }).then(resJson => {
+            this.loading = false
+            if (resJson.Success) {
+              this.ruleForm.template_name = resJson.Data.template_name
+              this.ruleForm.assessment_criteria = resJson.Data.assessment_criteria
+              this.ruleForm.id = this.type != 'view' ? resJson.Data.id : ''
+              this.ruleForm.template_code = this.type != 'view' ? resJson.Data.template_code : ''
+              this.ruleForm.create_user = resJson.Data.create_user
+              this.ruleForm.created_time = resJson.Data.created_time
+              this.ruleForm.updated_user = resJson.Data.updated_user
+              this.ruleForm.updated_time = resJson.Data.updated_time
+              this.ruleForm.Sort = resJson.Data.Sort
+              if (resJson.Data.templatItems.length > 0) {
+                this.setDetail(resJson.Data.templatItems)
+              }
+            }
+          })
+        }
+      },
+      // 模板明细数据处理
+      setDetail (model) {
+        this.tableData = []
+        this.ruleForm.scoresRange = []
+        this.tableHeaderJson = []
+        model.forEach((item, index) => {
+          const newObj = {
+            id: this.type != 'view' ? item.id : '',
+            assessment_template_id: this.type != 'view' ? item.assessment_template_id : '',
+            item_name: item.item_name,
+            Sort: item.Sort,
+          }
+          item.fractiona_items.forEach((child) => {
+            newObj[child.fractional] = child.Description
+            this.tableHeaderJson.push(child.fractional)
+          })
+          if (index === 0) {
+            item.fractiona_items.forEach((child, childIndex) => {
+              const scoresRange = {
+                min: child.fractional.replace(/\ /g, '').split('~')[0],
+                max: child.fractional.replace(/\ /g, '').split('~')[1]
+              }
+              this.ruleForm.scoresRange.push(scoresRange)
+              if (item.fractiona_items.length - 1 === childIndex) {
+                this.ruleForm.min = child.fractional.replace(/\ /g, '').split('~')[0]
+                this.ruleForm.max = child.fractional.replace(/\ /g, '').split('~')[1]
+              }
+            })
+          }
+          this.tableData.push(newObj)
+        })
+        this.setTableInfo()
+        // console.log(1, this.ruleForm.scoresRange)
+        // console.log(2, this.tableData)
+      },
+      // 分数选项小值
+      handelMinChange (val) {
+        if (String(val) != '' && String(val) != 'null' && val < this.ruleForm.max && String(this.ruleForm.max) != '' && String(this.ruleForm.max) != 'null') {
+          this.isCanAdd = false
+        } else {
+          this.isCanAdd = true
+        }
+        this.handelMaxMinScores()
+      },
+      // 分数选项大值
+      handelMaxChange (val) {
+        if (String(val) != '' && String(val) != 'null' && val > this.ruleForm.min && String(this.ruleForm.min) != '' && String(this.ruleForm.min) != 'null') {
+          this.isCanAdd = false
+        } else {
+          this.isCanAdd = true
+        }
+        this.handelMaxMinScores()
+      },
+      handelMaxMinScores () {
+        if (this.isCanAdd) {
+          this.ruleForm.maxMinScores = ''
+        } else {
+          this.ruleForm.maxMinScores = 'maxMinScores'
+          this.$refs['ruleForm'].validateField('maxMinScores')
+        }
+      },
+      // 添加分数区间
+      handelClickAdd () {
+        const newObj = {
+          min: this.ruleForm.min,
+          max: this.ruleForm.max
+        }
+        var oldObj = this.ruleForm.scoresRange.findIndex(item => {
+          return item.min === this.ruleForm.min && item.max === this.ruleForm.max
+        })
+        if (oldObj === -1) {
+          this.isTableData = true
+          this.ruleForm.scoresRange.push(newObj)
+          this.ruleForm.min = this.ruleForm.max
+          this.ruleForm.max = this.ruleForm.max + 5
+          this.setTableData()
+        } else {
+          this.$message.destroy()
+          this.$message.warning('存在相同分数区间！');
+        }
+      },
+      // 删除分数区间
+      handleClickClose (index) {
+        const thisScoresRange = JSON.parse(JSON.stringify(this.ruleForm.scoresRange[index]))
+        this.ruleForm.scoresRange.splice(index, 1)
+        this.setTableData(thisScoresRange)
+        console.log(this.ruleForm.scoresRange)
+        const lastScoresRange = this.ruleForm.scoresRange[this.ruleForm.scoresRange.length - 1]
+        this.ruleForm.min = lastScoresRange ? lastScoresRange.min : 0
+        this.ruleForm.max = lastScoresRange ? lastScoresRange.max : 5
+      },
+      setTableData (scoresRange) {
+        // console.log(scoresRange)
+        this.setTableInfo()
+        this.tableData.forEach((item, index) => {
+          this.tableHeader.forEach(child => {
+            this.$set(item, [child.key], (child.key === 'Sort') ? index + 1 : (item[child.key] ? item[child.key] : ''))
+          })
+          item.assessment_template_id = ''
+          item.id = ''
+          if (scoresRange) {
+            delete item[scoresRange.min + ' ~ ' + scoresRange.max]
+          }
+        })
+        // console.log(this.tableHeader, this.tableData)
+      },
+      setTableInfo () {
+        this.tableHeader = [{
+          label: '编号',
+          key: 'Sort'
+        }, {
+          label: '考核项目',
+          key: 'item_name'
+        }]
+        this.ruleForm.scoresRange.forEach((item, index) => {
+          // 表格头部部分
+          this.tableHeader.push({
+            label: item.min + ' ~ ' + item.max,
+            key: item.min + ' ~ ' + item.max
+          })
+        })
+        this.tableColumns = []
+        this.tableHeader.forEach((item, index) => {
+          let columns= { title: item.label, dataIndex: item.key, scopedSlots: { customRender: item.key }}
+          if (item.key === 'Sort') {
+            columns= { title: item.label, dataIndex: item.key, width: '55px'}
+          } else {
+            this.tableHeaderJson.push(item.key)
+          }
+          this.tableColumns.push(columns)
+        })
+        this.tableColumns.push({ title: '操作', dataIndex: 'action', scopedSlots: { customRender: 'action' }, width: '100px'})
+      },
+      handleSelectionChange () {
+        this.multipleSelection = []
+      },
+      addTable (blon, index) {
+        console.log(index)
+        if (blon) {
+          const li = JSON.parse(JSON.stringify(this.tableData[this.tableData.length - 1]))
+          li.id = this.tableData.length > 0 ? this.tableData[this.tableData.length - 1].Sort + 1 : this.tableData.length + 1
+          li.item_name = ''
+          for (let key in li) {
+            if (key === 'Sort') {
+              li[key] = this.tableData.length > 0 ? this.tableData[this.tableData.length - 1].Sort + 1 : this.tableData.length + 1
+            } else {
+              li[key] = ''
+            }
+          }
+          this.tableData.push(li)
+        } else {
+          this.tableData.splice(index, 1)
+        }
+      },
+
+      handleSubmit() {
+        if (this.type === 'view') {
+          this.visible = false
+        } else {
+          this.$refs['ruleForm'].validate(valid => {
+            if (!valid) {
+              return
+            }
+            if (this.ruleForm.scoresRange.length > 0) {
+              const submitData = {
+                id: this.ruleForm.id,
+                template_code: this.ruleForm.template_code,
+                template_name: this.ruleForm.template_name,
+                assessment_criteria: this.ruleForm.assessment_criteria,
+                create_user: this.ruleForm.create_user,
+                created_time: this.ruleForm.created_time,
+                updated_user: this.ruleForm.updated_user,
+                updated_time: this.ruleForm.updated_time,
+                Sort: this.ruleForm.Sort,
+                templatItems: []
+              }
+              console.log(this.tableData)
+              this.tableData.forEach(item => {
+                let newObj = {
+                  id: item.id,
+                  assessment_template_id: item.assessment_template_id,
+                  item_name: item.item_name,
+                  Sort: item.Sort,
+                  fractiona_items: []
+                }
+                for(let key  in item){
+                  if (key != 'id' && key != 'assessment_template_id' && key != 'item_name' && key != 'Sort') {
+                    let childObj = {
+                      fractional: key,
+                      Description: item[key]
+                    }
+                    newObj.fractiona_items.push(childObj)
+                  }
+                }
+                submitData.templatItems.push(newObj)
+              })
+              console.log(submitData)
+              this.loading = true
+              if (this.type === 'edit') {
+                this.$http.post('/HrAssessment/UpdateHrTemplateInfo', submitData).then(resJson => {
+                  this.loading = false
+                  if (resJson.Success) {
+                    this.$message.success('操作成功!')
+                    this.visible = false
+                    this.parentObj.getDataList()
+                  } else {
+                    this.$message.error(resJson.Msg)
+                  }
+                })
+              } else {
+                this.$http.post('/HrAssessment/InsertHrTemplateInfo', submitData).then(resJson => {
+                  this.loading = false
+                  if (resJson.Success) {
+                    this.$message.success('操作成功!')
+                    this.visible = false
+                    this.parentObj.getDataList()
+                  } else {
+                    this.$message.error(resJson.Msg)
+                  }
+                })
+              }
+            } else {
+              this.$message.warning('请录入考核项目');
+            }
+          })
+        }
+      }
+    }
+  }
+</script>
+<style type="text/css">
+  .scoresRangeItem{position: relative}
+  .scoresRangeItem .ant-form-item-control-wrapper .ant-form-item{
+    margin-bottom: 0;
+  }
+  .scoresRangeJson .ant-form-item-label{visibility: hidden;}
+</style>

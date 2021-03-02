@@ -1,0 +1,277 @@
+<template>
+  <a-modal :title="title" width="80%" :visible="visible" :confirmLoading="loading" :maskClosable="false" @ok="handleSubmit" @cancel="()=>{this.visible=false}" class="measureMentContent">
+    <a-spin :spinning="loading">
+      <a-form-model ref="ruleForm" :model="ruleForm" :rules="rules" v-bind="layout">
+        <a-form-model-item label="测评名称">{{ruleForm.evaluation_name}}</a-form-model-item>
+        <a-form-model-item label="测评模版" v-if="type === 'view'">{{ruleForm.template_name}}</a-form-model-item>
+        <a-form-model-item label=" 测评对象">
+          <a-tag>{{ruleForm.user_name}}</a-tag>
+        </a-form-model-item>
+        <template v-if="type === 'view'">
+          <a-form-model-item label="用人部门负责人">
+            <a-tag v-for="item in ruleForm.department" :key="item">{{item}}</a-tag>
+          </a-form-model-item>
+          <a-form-model-item label="同职级测评人">
+            <a-tag v-for="item in ruleForm.withEvaluation" :key="item">{{item}}</a-tag>
+          </a-form-model-item>
+          <a-form-model-item label="下级测评人">
+            <a-tag v-for="item in ruleForm.lowerEvaluation" :key="item">{{item}}</a-tag>
+          </a-form-model-item>
+          <a-form-model-item label="HR部门负责人">
+            <a-tag v-for="item in ruleForm.hrDepartment" :key="item">{{item}}</a-tag>
+          </a-form-model-item>
+        </template>
+        <br/>
+        <a-table
+          ref="table"
+          :columns="tableColumns"
+          :rowKey="(record,index)=>{return index}"
+          :dataSource="tableData"
+          :bordered="true"
+          :pagination="false"
+          size="small" v-if="scoresRange.length > 0">
+          <template slot="score" slot-scope="text, record, index">
+            <a-input-number v-model="record.score" @change="handelTotalScore" controls-position="right" :min="0" :max="maxScore"/>
+          </template>
+          <template slot="footer" v-if="type != 'view'">
+            <div style="padding: 0 20px;">
+              说明：每项指标均以{{ruleForm.assessment_criteria / tableData.length}}分计，总分为{{ruleForm.assessment_criteria}}分制
+              <span style="float: right;"> 合计得分：{{totalScore}}</span>
+            </div>
+          </template>
+        </a-table>
+      </a-form-model>
+    </a-spin>
+  </a-modal>
+</template>
+
+<script>
+  export default {
+    props: {
+      parentObj: Object
+    },
+    data() {
+      return {
+        layout: {
+          labelCol: {
+            span: 5
+          },
+          wrapperCol: {
+            span: 18
+          }
+        },
+        visible: false,
+        loading: false,
+        ruleForm: {},
+        rules: {},
+        title: '',
+        scoresRange: [],
+        tableHeader: [],
+        tableData: [],
+        tableColumns: [],
+        type: 'add',
+        id: '',
+        totalScore: 0,
+        isSubmit: 0,
+        formData: [],
+        maxScoreJson: [],
+        maxScore: 0
+      }
+    },
+    methods: {
+      init() {
+        this.visible = true
+        this.$nextTick(() => {
+          this.$refs['ruleForm'].resetFields()
+        })
+      },
+      openForm(data) {
+        this.type = 'add'
+        this.id = ''
+        this.init()
+        if (data) {
+          this.type = data.type
+          this.id = data.id
+          this.loading = true
+          this.$http.post('/HrAssessment/GetHrEvaluationInfo', {
+            id: this.id
+          }).then(resJson => {
+            this.loading = false
+            // console.log(resJson)
+            this.ruleForm = resJson.Data
+            this.ruleForm.department = []
+            this.ruleForm.withEvaluation = []
+            this.ruleForm.lowerEvaluation = []
+            this.ruleForm.hrDepartment = []
+            this.ruleForm.H_users.forEach(item => {
+              switch (item.user_type) {
+                case 1:
+                  this.ruleForm.department.push(item.user_name)
+                  break
+                case 2:
+                  this.ruleForm.withEvaluation.push(item.user_name)
+                  break
+                case 3:
+                  this.ruleForm.lowerEvaluation.push(item.user_name)
+                  break
+                default:
+                  this.ruleForm.hrDepartment.push(item.user_name)
+                  break
+              }
+            })
+            this.ruleForm.template_name = resJson.Data.TemplateInfo.template_name
+            this.ruleForm.assessment_criteria = resJson.Data.TemplateInfo.assessment_criteria
+            if (resJson.Data.TemplateInfo.templatItems.length > 0) {
+              this.setDetail(resJson.Data.TemplateInfo.templatItems)
+            }
+          })
+        }
+      },
+      // 模板明细数据处理
+      setDetail (model) {
+        this.tableData = []
+        this.scoresRange = []
+        if (this.type === 'view') {
+          let tatalObj = {
+            id: '' ,
+            assessment_template_id: '',
+            item_name: '合计',
+            Sort: '',
+          }
+          model.forEach((item, index) => {
+            // console.log(item)
+            const newObj = {
+              id: item.id ,
+              assessment_template_id: item.assessment_template_id,
+              item_name: item.item_name,
+              Sort: item.Sort,
+            }
+            item.H_Score.forEach(child => {
+              newObj[child.assessment_user_name ? child.assessment_user_name: child.assessment_user_id] = child.score
+              tatalObj[child.assessment_user_name ? child.assessment_user_name: child.assessment_user_id] = 0
+              if (index === 0) {
+                this.scoresRange.push(child.assessment_user_name ? child.assessment_user_name: child.assessment_user_id)
+              }
+            })
+            this.tableData.push(newObj)
+          })
+          this.tableData.forEach((item, index) => {
+            Object.keys(item).forEach(key => {
+              if (key != 'id' && key != 'assessment_template_id' && key != 'item_name' && key != 'Sort') {
+                tatalObj[key] += Number(item[key])
+              }
+            })
+          })
+          this.tableData.push(tatalObj)
+          console.log(1, this.tableData)
+        } else {
+          model.forEach((item, index) => {
+            const newObj = {
+              id: item.id ,
+              assessment_template_id: item.assessment_template_id,
+              item_name: item.item_name,
+              Sort: item.Sort,
+            }
+            item.fractiona_items.forEach((child) => {
+              newObj[child.fractional] = child.Description
+            })
+            if (index === 0) {
+              item.fractiona_items.forEach((child, childIndex) => {
+                const scoresRange = {
+                  min: child.fractional.replace(/\ /g, '').split('~')[0],
+                  max: child.fractional.replace(/\ /g, '').split('~')[1]
+                }
+                this.scoresRange.push(scoresRange)
+                this.maxScoreJson.push(Number(child.fractional.replace(/\ /g, '').split('~')[0]))
+                this.maxScoreJson.push(Number(child.fractional.replace(/\ /g, '').split('~')[1]))
+              })
+            }
+            this.tableData.push(newObj)
+          })
+        }
+        this.maxScoreJson = this.maxScoreJson.sort(this.arrSort) // 范围值数组
+        this.maxScore = this.maxScoreJson[this.maxScoreJson.length - 1] // 最大范围值
+        this.setTableInfo()
+      },
+      arrSort(val1,val2){
+        return val1-val2;
+      },
+      setTableInfo () {
+        this.tableHeader = [{
+          label: '编号',
+          key: 'Sort'
+        }, {
+          label: '考核项目',
+          key: 'item_name'
+        }]
+        this.scoresRange.forEach((item, index) => {
+          // 表格头部部分
+          if (this.type === 'view') {
+            this.tableHeader.push({
+              label: item,
+              key: item
+            })
+          } else {
+            this.tableHeader.push({
+              label: item.min + ' ~ ' + item.max,
+              key: item.min + ' ~ ' + item.max
+            })
+          }
+        })
+        this.tableColumns = []
+        this.tableHeader.forEach((item, index) => {
+          let columns= { title: item.label, dataIndex: item.key, scopedSlots: { customRender: item.key }}
+          if (item.key === 'Sort') {
+            columns= { title: item.label, dataIndex: item.key, width: '55px'}
+          }
+          this.tableColumns.push(columns)
+        })
+        if (this.type === 'add') {
+          this.tableColumns.push({ title: '评分', dataIndex: 'score', scopedSlots: { customRender: 'score' }, width: '100px'})
+        }
+      },
+      // 评测分数录入
+      handelTotalScore () {
+        this.totalScore = 0
+        this.isSubmit = 0
+        this.formData = []
+        this.tableData.forEach(item => {
+          if (Number(item.score)) {
+            this.totalScore += Number(item.score)
+            this.isSubmit ++
+            const obj = {
+              assessment_evaluation_id: this.id,
+              assessment_items_id: item.id,
+              score: Number(item.score),
+            }
+            this.formData.push(obj)
+          }
+        })
+      },
+      handleSubmit() {
+        if (this.type === 'view') {
+          this.visible = false
+        } else {
+          if (this.isSubmit === this.tableData.length) {
+            this.loading = true
+            this.$http.post('/HrAssessment/InsertHrAssessmentScore', this.formData).then(resJson => {
+              this.loading = false
+              if (resJson.Success) {
+                this.$message.success('操作成功!')
+                this.visible = false
+                this.parentObj.getDataList()
+              } else {
+                this.$message.error(resJson.Msg)
+              }
+            })
+          } else {
+            this.$message.warning('请检查评分输入是否完整');
+          }
+        }
+      }
+    }
+  }
+</script>
+<style type="text/css">
+  .measureMentContent .ant-form .ant-form-item{margin-bottom: 0;}
+</style>

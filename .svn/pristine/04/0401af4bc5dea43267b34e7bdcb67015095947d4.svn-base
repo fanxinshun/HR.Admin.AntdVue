@@ -1,0 +1,15 @@
+﻿namespace Coldairarrow.Util
+{
+    public class IdInputDTO
+    {
+        /// <summary>
+        /// id
+        /// </summary>
+        public string id { get; set; }
+
+        /// <summary>
+        /// project_id
+        /// </summary>
+        public string project_id { get; set; }
+    }
+}

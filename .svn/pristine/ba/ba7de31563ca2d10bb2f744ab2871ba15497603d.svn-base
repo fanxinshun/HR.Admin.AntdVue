@@ -1,0 +1,295 @@
+<template>
+  <a-modal :title="title" width="660px" :visible="visible" :confirmLoading="loading" :maskClosable="false" @ok="handleSubmit" @cancel="()=>{this.visible=false}" label-width="120px">
+    <a-spin :spinning="loading">
+      <a-form-model ref="ruleForm" :model="ruleForm" :rules="rules" v-bind="layout">
+        <a-form-model-item label="测评名称" prop="evaluation_name">
+          <a-input v-model="ruleForm.evaluation_name" autocomplete="off" :disabled="type === 'view'" />
+        </a-form-model-item>
+        <a-form-model-item label="测评模版" prop="assessment_template_id">
+          <c-select v-model="ruleForm.assessment_template_id" url="/HrAssessment/GetOptionList" searchMode="server" :disableds="type === 'view'" @handleInput="getAssessment_template"></c-select>
+        </a-form-model-item>
+        <a-form-model-item label=" 测评对象" prop="user_id">
+          <c-select v-model="ruleForm.user_id" url="/Base_Manage/Base_User/GetUserOptionList" searchMode="server" :disableds="type === 'view'" @handleInput="getUser_id"></c-select>
+        </a-form-model-item>
+        <a-form-model-item label="用人部门负责人" prop="department">
+          <c-select v-model="ruleForm.department" url="/Base_Manage/Base_User/GetUserOptionList" :multiple="true" searchMode="server" :disableds="type === 'view'" @handleInput="getDepartment"></c-select>
+        </a-form-model-item>
+        <a-form-model-item label="同职级测评人" prop="withEvaluation">
+          <c-select v-model="ruleForm.withEvaluation" url="/Base_Manage/Base_User/GetUserOptionList" :multiple="true" searchMode="server" :disableds="type === 'view'" @handleInput="getEvaluation"></c-select>
+        </a-form-model-item>
+        <a-form-model-item label="下级测评人" prop="lowerEvaluation">
+          <c-select v-model="ruleForm.lowerEvaluation" url="/Base_Manage/Base_User/GetUserOptionList" :multiple="true" searchMode="server" :disableds="type === 'view'" @handleInput="getLowerEvaluation"></c-select>
+        </a-form-model-item>
+        <a-form-model-item label="HR部门负责人" prop="hrDepartment">
+          <c-select v-model="ruleForm.hrDepartment" url="/Base_Manage/Base_User/GetUserOptionList" :multiple="true" searchMode="server" :disableds="type === 'view'" @handleInput="getHrDepartment"></c-select>
+        </a-form-model-item>
+      </a-form-model>
+    </a-spin>
+  </a-modal>
+</template>
+
+<script>
+  import CSelect from '@/components/CSelect/CSelect'
+  export default {
+    props: {
+      parentObj: Object
+    },
+    components: {
+      CSelect
+    },
+    data() {
+      return {
+        layout: {
+          labelCol: {
+            span: 5
+          },
+          wrapperCol: {
+            span: 18
+          }
+        },
+        visible: false,
+        loading: false,
+        ruleForm: {
+          id: '',
+          evaluation_name: '',
+          assessment_template_id: '',
+          user_id: '',
+          user_name: '',
+          completion_time: '',
+          status: '',
+          create_user: '',
+          created_time: '',
+          updated_user: '',
+          updated_time: '',
+          Sort: 0,
+          Deleted: false,
+          department: [],
+          withEvaluation: [],
+          lowerEvaluation: [],
+          hrDepartment: [],
+          usersDepartment: [],
+          usersWithEvaluation: [],
+          usersLowerEvaluation: [],
+          usersHrDepartment: [],
+          H_users: [
+            {
+              id: '',
+              assessment_evaluation_id: '',
+              user_type: 1, // 1 用人部门负责人  2 同职级测评人  3 下级测评人 4 HR部门负责人
+              user_id: '',
+              user_name: '',
+              Sort: 0
+            }
+          ],
+        },
+        rules: {
+          evaluation_name: [{
+            required: true,
+            message: '请输入测评名称'
+          }],
+          assessment_template_id: [{
+            required: true,
+            message: '请选择测评模版'
+          }],
+          user_id: [{
+            required: true,
+            message: '请选择测评对象'
+          }],
+
+          department: [{
+            required: true,
+            message: '请选择用人部门负责人'
+          }],
+          withEvaluation: [{
+            required: true,
+            message: '请选择同职级测评人'
+          }],
+          lowerEvaluation: [{
+            required: true,
+            message: '请选择下级测评人'
+          }],
+          hrDepartment: [{
+            required: true,
+            message: '请选择HR部门负责人'
+          }]
+        },
+        title: '',
+        type: 'add',
+        id: ''
+      }
+    },
+    methods: {
+      init() {
+        this.visible = true
+        this.$nextTick(() => {
+          this.$refs['ruleForm'].resetFields()
+        })
+      },
+      openForm(data) {
+        this.type = 'add'
+        this.id = ''
+        console.log(data)
+        this.init()
+        if (data) {
+          this.type = data.type
+          this.id = data.id
+          this.loading = true
+          this.$http.post('/HrAssessment/GetHrEvaluationInfo', {
+            id: this.id
+          }).then(resJson => {
+            this.loading = false
+            console.log(resJson)
+            if (resJson.Success) {
+              this.ruleForm = resJson.Data
+              this.ruleForm.department = []
+              this.ruleForm.withEvaluation = []
+              this.ruleForm.lowerEvaluation = []
+              this.ruleForm.hrDepartment = []
+              this.ruleForm.usersDepartment = []
+              this.ruleForm.usersWithEvaluation = []
+              this.ruleForm.usersLowerEvaluation = []
+              this.ruleForm.usersHrDepartment = []
+              this.ruleForm.H_users.forEach(item => {
+                item.assessment_evaluation_id = this.type === 'copy' ? '' : item.assessment_evaluation_id
+                item.id = this.type === 'copy' ? '' : item.id
+                switch (item.user_type) {
+                  case 1:
+                    this.ruleForm.department.push(item.user_id)
+                    this.ruleForm.usersDepartment.push(item)
+                    break
+                  case 2:
+                    this.ruleForm.withEvaluation.push(item.user_id)
+                    this.ruleForm.usersWithEvaluation.push(item)
+                    break
+                  case 3:
+                    this.ruleForm.lowerEvaluation.push(item.user_id)
+                    this.ruleForm.usersLowerEvaluation.push(item)
+                    break
+                  default:
+                    this.ruleForm.hrDepartment.push(item.user_id)
+                    this.ruleForm.usersHrDepartment.push(item)
+                    break
+                }
+              })
+            } else {
+              this.$message.warning(resJson.Msg);
+            }
+          })
+        }
+      },
+      //  模板选择
+      getAssessment_template (data) {
+        this.$refs['ruleForm'].validateField('assessment_template_id')
+      },
+      // 测评对象
+      getUser_id (data) {
+        data.thisOptions.forEach(item => {
+          if (data.value === item.value) {
+            this.ruleForm.user_name = item.text
+          }
+        })
+        this.$refs['ruleForm'].validateField('user_id')
+      },
+      // 获取用人部门负责人
+      getDepartment (data) {
+        this.ruleForm.usersDepartment = []
+        this.setUserData(data, this.ruleForm.usersDepartment, 1)
+        this.$refs['ruleForm'].validateField('department')
+      },
+      // 同职级测评人
+      getEvaluation (data) {
+        this.ruleForm.usersWithEvaluation = []
+        this.setUserData(data, this.ruleForm.usersWithEvaluation, 2)
+        this.$refs['ruleForm'].validateField('withEvaluation')
+      },
+      // 下级测评人
+      getLowerEvaluation (data) {
+        this.ruleForm.usersLowerEvaluation = []
+        this.setUserData(data, this.ruleForm.usersLowerEvaluation, 3)
+        this.$refs['ruleForm'].validateField('lowerEvaluation')
+      },
+      // HR部门负责人
+      getHrDepartment (data) {
+        this.ruleForm.usersHrDepartment = []
+        this.setUserData(data, this.ruleForm.usersHrDepartment, 4)
+        this.$refs['ruleForm'].validateField('hrDepartment')
+      },
+      // 选择用户回调方法
+      setUserData (data, json, type) {
+        data.thisOptions.forEach(item => {
+          if (data.value.indexOf(item.value) > -1) {
+            json.push(this.setH_users(item, type))
+          }
+        })
+      },
+      // 匹配选择的用户
+      setH_users (data, type) {
+        const model = {
+          id: '',
+          assessment_evaluation_id: '',
+          user_type: type, // 1 用人部门负责人  2 同职级测评人  3 下级测评人 4 HR部门负责人
+          user_id: data.value,
+          user_name: data.text,
+          Sort: 0
+        }
+        return model
+      },
+      handleSubmit() {
+        if (this.type === 'view') {
+          this.visible = false
+        } else {
+          this.$refs['ruleForm'].validate(valid => {
+            if (!valid) {
+              return
+            }
+            const fomrData = {
+              id: this.ruleForm.id,
+              evaluation_name: this.ruleForm.evaluation_name,
+              assessment_template_id: this.ruleForm.assessment_template_id,
+              user_id: this.ruleForm.user_id,
+              user_name: this.ruleForm.user_name,
+              completion_time: this.ruleForm.completion_time,
+              status: this.ruleForm.status,
+              create_user: this.ruleForm.create_user,
+              created_time: this.ruleForm.created_time,
+              updated_user: this.ruleForm.updated_user,
+              updated_time: this.ruleForm.updated_time,
+              Sort: this.ruleForm.Sort,
+              Deleted: this.ruleForm.Deleted,
+              H_users: this.ruleForm.usersDepartment.concat(this.ruleForm.usersWithEvaluation, this.ruleForm.usersLowerEvaluation, this.ruleForm.usersHrDepartment),
+            }
+            console.log(fomrData)
+            this.loading = true
+            if (this.type === 'edit') {
+              this.$http.post('/HrAssessment/InsertHrEvaluationInfo', fomrData).then(resJson => {
+                this.loading = false
+
+                if (resJson.Success) {
+                  this.$message.success('操作成功!')
+                  this.visible = false
+
+                  this.parentObj.getDataList()
+                } else {
+                  this.$message.error(resJson.Msg)
+                }
+              })
+            } else {
+              this.$http.post('/HrAssessment/InsertHrEvaluationInfo', fomrData).then(resJson => {
+                this.loading = false
+
+                if (resJson.Success) {
+                  this.$message.success('操作成功!')
+                  this.visible = false
+
+                  this.parentObj.getDataList()
+                } else {
+                  this.$message.error(resJson.Msg)
+                }
+              })
+            }
+          })
+        }
+      }
+    }
+  }
+</script>

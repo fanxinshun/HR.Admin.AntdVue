@@ -1,0 +1,143 @@
+﻿using Coldairarrow.Business.HrAssessment;
+using Coldairarrow.Entity.HrAssessment;
+using Coldairarrow.IBusiness.HrAssessment.DTO;
+using Coldairarrow.Util;
+using Microsoft.AspNetCore.Mvc;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Api.Controllers.HrAssessment
+{
+    /// <summary>
+    /// 人事测评
+    /// </summary>
+    //[Authorize]
+    [Route("[controller]/[action]")]
+    [ApiController]
+    public class HrAssessmentController : Controller
+    {
+        private IHr_assessment_templateService _IHr_assessment_templateService;
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="iService"></param>
+        public HrAssessmentController(IHr_assessment_templateService iService)
+        {
+            _IHr_assessment_templateService = iService;
+        }
+
+        /// <summary>
+        /// 查询一个模板
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        [HttpPost]
+        public async Task<IActionResult> GetModel(string id)
+        {
+            var vm = await _IHr_assessment_templateService.GetHrTemplateInfo(id);
+            return new JsonResult(vm);
+        }
+
+
+        /// <summary>
+        /// 查询模板列表
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        [HttpPost]
+        public async Task<PageResult<hr_assessment_template>> GetList(PageInput input)
+        {
+            input.SortField = "id";
+            input.SortType = "desc";
+            return await _IHr_assessment_templateService.GetHrTemplateList(input);
+        }
+
+        /// <summary>
+        /// 创建模板
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<IActionResult> InsertHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            vm.create_user ??= User.Claims.Where(w => w.Type == ClaimTypes.Sid).FirstOrDefault()?.Value;
+
+            var result = await _IHr_assessment_templateService.InsertHrTemplateInfo(vm);
+            return new JsonResult(result);
+        }
+
+        /// <summary>
+        /// 修改模板
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<IActionResult> UpdateHrTemplateInfo(HrTemplateInfoDTO vm)
+        {
+            vm.updated_user ??= User.Claims.Where(w => w.Type == ClaimTypes.Sid).FirstOrDefault()?.Value;
+
+            var result = await _IHr_assessment_templateService.UpdateHrTemplateInfo(vm);
+            return new JsonResult(result);
+        }
+
+
+        /// <summary>
+        /// 创建测评
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<IActionResult> InsertHrEvaluationInfo(HrEvaluationDTO vm)
+        {
+            vm.create_user ??= User.Claims.Where(w => w.Type == ClaimTypes.Sid).FirstOrDefault()?.Value;
+
+            var result = await _IHr_assessment_templateService.InsertHrHrEvaluationInfo(vm);
+            return new JsonResult(result);
+        }
+
+        /// <summary>
+        /// 测评得分保存
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<IActionResult> InsertHrAssessmentScore(List<hr_assessment_score> vm)
+        {
+            var userId = User.Claims.Where(w => w.Type == ClaimTypes.Sid).FirstOrDefault()?.Value;
+            vm.ForEach(item =>
+            {
+                item.create_user = userId;
+            });
+
+            var result = await _IHr_assessment_templateService.InsertHrAssessmentScore(vm, userId);
+            return new JsonResult(result);
+        }
+        /// <summary>
+        /// 查询测评列表
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<PageResult<HrEvaluationDTO>> GetHrEvaluationList(PageInput<HrEvaluationInput> pageInput)
+        {
+            return await _IHr_assessment_templateService.GetHrEvaluationList(pageInput);
+        }
+
+
+        /// <summary>
+        /// 查看测评
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        [HttpPost]
+        public async Task<IActionResult> GetHrEvaluationInfo(string id)
+        {
+
+            var result = await _IHr_assessment_templateService.GetHrEvaluationInfo(id);
+            return new JsonResult(result);
+        }
+    }
+}

@@ -1,0 +1,78 @@
+﻿using AutoMapper;
+using Coldairarrow.Business.Cache;
+using Coldairarrow.Business.MiniPrograms;
+using Coldairarrow.Entity.Base_Manage;
+using Coldairarrow.IBusiness;
+using Coldairarrow.Util;
+using EFCore.Sharding;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace Coldairarrow.Business.Base_Manage
+{
+    public class HomeBusiness : BaseBusiness<Base_User>, IHomeBusiness, ITransientDependency
+    {
+        readonly IOperator _operator;
+        readonly IMapper _mapper;
+        readonly Imini_project_userBusiness _mini_project_userBusiness;
+        IBase_UserCache _userCache { get; }
+        public HomeBusiness(IDbAccessor db, IOperator @operator,
+            IMapper mapper,
+            Imini_project_userBusiness mini_project_userBusiness, IBase_UserCache userCache)
+            : base(db)
+        {
+            _operator = @operator;
+            _mapper = mapper;
+            _mini_project_userBusiness = mini_project_userBusiness;
+            _userCache = userCache;
+        }
+
+        public async Task<string> SubmitLoginAsync(LoginInputDTO input)
+        {
+            input.password = input.password.ToMD5String();
+            var theUser = await GetIQueryable().FirstOrDefaultAsync(x => x.UserName == input.userName && x.Password == input.password);
+
+            if (theUser.IsNullOrEmpty())
+                throw new BusException("账号或密码不正确！");
+
+            List<UserProjectDTO> projusers = await _mini_project_userBusiness.GetUserProjectListAsync(theUser.Id);
+            if (projusers?.Count > 0)
+            {
+                //var defaultProject = projusers.FirstOrDefault(x => x.Id == theUser.Last_Interview_Project)?.Id ?? projusers.FirstOrDefault()?.Id;
+                //if (theUser.Last_Interview_Project != defaultProject)
+                //{
+                //    theUser.Last_Interview_Project = defaultProject ?? projusers.FirstOrDefault()?.Id;
+                //    await UpdateAsync(theUser);
+                //    await _userCache.UpdateCacheAsync(theUser.Id);
+                //}
+            }
+            else
+            {
+                throw new BusException("该账号没有所属的项目地，请联系管理员维护项目地");
+            }
+
+            //生成token,有效期
+            JWTPayload jWTPayload = new JWTPayload
+            {
+                UserId = theUser.Id,
+                Expire = DateTime.Now.AddDays(1)
+            };
+            string token = JWTHelper.GetToken(jWTPayload.ToJson(), JWTHelper.JWTSecret);
+
+            return token;
+        }
+
+        public async Task ChangePwdAsync(ChangePwdInputDTO input)
+        {
+            var theUser = _operator.Property;
+            if (theUser.Password != input.oldPwd?.ToMD5String())
+                throw new BusException("原密码错误!");
+
+            theUser.Password = input.newPwd.ToMD5String();
+            await UpdateAsync(_mapper.Map<Base_User>(theUser));
+        }
+    }
+}
